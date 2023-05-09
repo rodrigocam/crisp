@@ -1,25 +1,51 @@
 use std::{collections::{VecDeque, HashMap}, env};
 
-
 fn main() {
     let args: Vec<String> = env::args().collect(); 
     if args.len() > 1 {
         println!("AST: {}", parse(args[1].clone()).unwrap());
+        println!("EVAL: {}", eval(parse(args[1].clone()).unwrap(), new_context()));
     }
+}
+
+fn new_context() -> Context {
+    let mut c = Context::new();
+    c.insert("+".to_string(), Exp::Proc(|args| {
+        return match (&args[0], &args[1]) {
+            (Exp::Atom(Atom::Number(x)), Exp::Atom(Atom::Number(y))) => Exp::Atom(Atom::Number(x+y)),
+            _ => panic!(""),
+        }
+    }));
+    
+    c.insert("*".to_string(), Exp::Proc(|args| {
+        return match (&args[0], &args[1]) {
+            (Exp::Atom(Atom::Number(x)), Exp::Atom(Atom::Number(y))) => Exp::Atom(Atom::Number(x*y)),
+            _ => panic!(""),
+        }
+    }));
+    
+    c.insert("/".to_string(), Exp::Proc(|args| {
+        return match (&args[0], &args[1]) {
+            (Exp::Atom(Atom::Number(x)), Exp::Atom(Atom::Number(y))) => Exp::Atom(Atom::Number(x/y)),
+            _ => panic!(""),
+        }
+    }));
+
+    c
 }
 
 fn tokenize(input: String) -> VecDeque<String> {
     input.replace("(", "( ").replace(")", " )").split(" ").map(|s| s.to_string()).collect()
 }
 
-#[derive(Debug)]
+type Context = HashMap<String, Exp>;
+
+#[derive(Clone)]
 pub enum Exp {
     Atom(Atom),
-    List(List)
+    List(List),
+    Proc(fn(args: &[Exp]) -> Exp),
 }
-
-#[derive(Debug)]
-pub struct List(Vec<Exp>);
 
 impl std::fmt::Display for Exp {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -31,10 +57,16 @@ impl std::fmt::Display for Exp {
             Self::List(e) => {
                 repr.push_str(format!("{}", e).as_str());
             }
+            _ => {
+                repr.push_str(format!("proc").as_str());
+            }
         }
         write!(f, "{}", repr)
     }
 }
+
+#[derive(Clone)]
+pub struct List(Vec<Exp>);
 
 impl std::fmt::Display for List {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -43,10 +75,9 @@ impl std::fmt::Display for List {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Atom {
-    Int(i64),
-    Float(f64),
+    Number(f64),
     Symbol(String),
 }
 
@@ -54,10 +85,7 @@ impl std::fmt::Display for Atom {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let mut repr = String::new();
         match &self {
-            Self::Int(n) => {
-                repr.push_str(format!("{:?}", n).as_str());
-            },
-            Self::Float(n) => {
+            Self::Number(n) => {
                 repr.push_str(format!("{:?}", n).as_str());
             },
             Self::Symbol(s) => {
@@ -80,17 +108,11 @@ impl std::fmt::Display for ParsingError {
     }
 }
 
-fn atom(t: String) -> Atom {
-    let int = t.parse::<i64>();
-    let float = t.parse::<i64>();
-
-    if int.is_ok() {
-        return Atom::Int(int.unwrap() as i64);
-    } else if float.is_ok() {
-        return Atom::Float(float.unwrap() as f64);
+fn to_atom(token: String) -> Atom {
+    match token.parse::<f64>() {
+        Ok(f) => return Atom::Number(f),
+        _ => return Atom::Symbol(token)
     }
-
-    return Atom::Symbol(t);
 }
 
 fn read_from_tokens(tokens: &mut VecDeque<String>) -> Result<Exp, ParsingError> {
@@ -113,7 +135,7 @@ fn read_from_tokens(tokens: &mut VecDeque<String>) -> Result<Exp, ParsingError> 
             return Err(ParsingError::UnexpectedEOF);
         },
         _ => {
-            return Ok(Exp::Atom(atom(token)));
+            return Ok(Exp::Atom(to_atom(token)));
         }
     }
 }
@@ -131,4 +153,21 @@ fn parse(input: String) -> Result<Exp, ParsingError> {
 }
  
 
-// fn eval(expr: Expr, ctx: Context)
+fn eval(exp: Exp, ctx: Context) -> Exp {
+    match exp {
+        Exp::Atom(Atom::Symbol(s)) => return ctx.get(&s).unwrap().clone(),
+        Exp::Atom(n) => return Exp::Atom(n),
+        _ => {
+            if let Exp::List(l) = exp {
+                let proc = eval(l.0[0].clone(), ctx.clone());
+                let args: Vec<Exp> = l.0[1..].iter().map(|a| eval(a.clone(), ctx.clone())).collect();
+
+                if let Exp::Proc(p) = proc {
+                    return p(&args[..]);
+                }
+            }
+
+            panic!();
+        }
+    }
+}
