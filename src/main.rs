@@ -4,12 +4,17 @@ fn main() {
     let args: Vec<String> = env::args().collect(); 
     if args.len() > 1 {
         println!("AST: {}", parse(args[1].clone()).unwrap());
-        println!("EVAL: {}", eval(parse(args[1].clone()).unwrap(), new_context()));
+        println!("EVAL: {}", eval(parse(args[1].clone()).unwrap(), &mut new_context()));
     }
 }
 
 fn new_context() -> Context {
     let mut c = Context::new();
+    
+    c.insert("begin".to_string(), Exp::Proc(|args| {
+        args.last().unwrap().clone()
+    }));
+
     c.insert("+".to_string(), Exp::Proc(|args| {
         return match (&args[0], &args[1]) {
             (Exp::Atom(Atom::Number(x)), Exp::Atom(Atom::Number(y))) => Exp::Atom(Atom::Number(x+y)),
@@ -153,21 +158,30 @@ fn parse(input: String) -> Result<Exp, ParsingError> {
 }
  
 
-fn eval(exp: Exp, ctx: Context) -> Exp {
+fn eval(exp: Exp, ctx: &mut Context) -> Exp {
     match exp {
-        Exp::Atom(Atom::Symbol(s)) => return ctx.get(&s).unwrap().clone(),
+        Exp::Atom(Atom::Symbol(s)) => { 
+            return ctx.get(&s).unwrap().clone()
+        },
         Exp::Atom(n) => return Exp::Atom(n),
-        _ => {
-            if let Exp::List(l) = exp {
-                let proc = eval(l.0[0].clone(), ctx.clone());
-                let args: Vec<Exp> = l.0[1..].iter().map(|a| eval(a.clone(), ctx.clone())).collect();
+        Exp::List(List(v)) => {
+            match (&v[0], &v[1]) {
+                (Exp::Atom(Atom::Symbol(s)), Exp::Atom(Atom::Symbol(name))) if  s == "define" => {
+                    ctx.insert(name.to_string(), eval(v[2].clone(), &mut ctx.clone()));
+                    return v[1].clone();
+                }
+                _ => {
+                    let proc = eval(v[0].clone(), ctx);
+                    let args: Vec<Exp> = v[1..].iter().map(|a| eval(a.clone(), ctx)).collect();
 
-                if let Exp::Proc(p) = proc {
-                    return p(&args[..]);
+                    if let Exp::Proc(p) = proc {
+                        return p(&args[..]);
+                    }
+
+                    panic!();
                 }
             }
-
-            panic!();
-        }
+        },
+        Exp::Proc(p) => panic!()
     }
 }
